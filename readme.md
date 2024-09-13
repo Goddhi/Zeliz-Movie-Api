@@ -1,5 +1,3 @@
 # ZELIZ MOVIE API
 
 ....
-
-

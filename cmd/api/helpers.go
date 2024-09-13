@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -30,7 +31,8 @@ type envelope map[string]interface{}
 
 //  writeJSON helper method
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {
-	
+	// Use http.MaxBytesReader() to limit the size of the request body to 1MB.
+
 	js, err := json.MarshalIndent(data, "", "\t") // Here we use no line prefix ("") and tab indents ("\t") for each element.
 	if err != nil {
 		return err
@@ -54,44 +56,66 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data envelo
 
 }
 
+
+
+
 func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
-	//decode the request body into the target destination
-	err := json.NewDecoder(r.Body).Decode(dst)
+	maxBytes := 1_048_576
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
+
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()  // This means that if the JSON from the client now includes any
+	// field which cannot be mapped to the target destination, the decoder will return
+	// an error instead of just ignoring the field.
+	err := dec.Decode(dst)	// // Decode the request body to the destination.
 	if err != nil {
-		var syntaxError *json.SyntaxError
-		var unmarshalTypeError *json.UnmarshalTypeError
-		var invalidUnmarshalError *json.InvalidUnmarshalError
+	// If there is an error during decoding, start the triage...
+	var syntaxError *json.SyntaxError
+	var unmarshalTypeError *json.UnmarshalTypeError
+	var invalidUnmarshalError *json.InvalidUnmarshalError
+	switch {
+
+	case errors.As(err, &syntaxError):
+	return fmt.Errorf("body contains badly-formed JSON (at character %d)", syntaxError.Offset)
+
+	case errors.Is(err, io.ErrUnexpectedEOF):
+	return errors.New("body contains badly-formed JSON")
+
+	case errors.As(err, &unmarshalTypeError):
+	if unmarshalTypeError.Field != "" {
+	return fmt.Errorf("body contains incorrect JSON type for field %q", unmarshalTypeError.Field)
+	}
+	return fmt.Errorf("body contains incorrect JSON type (at character %d)", unmarshalTypeError.Offset)
+
+	case errors.Is(err, io.EOF):
+	return errors.New("body must not be empty")
+
+
+	case strings.HasPrefix(err.Error(), "json: unknow field"):
+		fileName := strings.TrimPrefix(err.Error(), "json: unknown field")
+		return fmt.Errorf("body contains unknown key %s", fileName)
+
+	case err.Error() == "http: request body too large":
+		return fmt.Errorf("body must be larger than %d bytes", maxBytes)
+ 	
 	
-		switch {
-		case errors.As(err, &syntaxError):
-			return fmt.Errorf("body contains badly-formed JSON (at character %d", syntaxError.Offset)
-
-		case errors.As(err, io.ErrUnexpectedEOF):
-			return errors.New("body contains baly-formed JSON")
-		
-		case errors.As(err, &unmarshalTypeError):
-			if unmarshalTypeError.Field != "" {
-				return fmt.Errorf("body contains incorrect JSON type for field %q", unmarshalTypeError.Field)
-			}
-			return fmt.Errorf("body contains incorrect JSON type (at character %d)", unmarshalTypeError.Offset)
-
-		case errors.Is(err, io.EOF):
-			return errors.New("body must not be empty")
-		// // For anything else, return the error message as-is.
-		
-		case errors.As(err, &invalidUnmarshalError):
-			panic(err)
-			
-		
-		default: 
-			return err
-		}
+	case errors.As(err, &invalidUnmarshalError):
+		panic(err)  // this error is likely to occur in the development stage due to not assiging pointers to the struct 
+		// For anything else, return the error message as-is.	
+	
+	default:
+	return err
 
 	}
-	
-	return nil
-
 }
 
+	err = dec.Decode(&struct{}{})
+	if err != io.EOF {
+		return errors.New("body must only contain a single JSON value")
+	}
 
 
+
+return nil
+
+}
