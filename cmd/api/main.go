@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"flag"
 	"log"
@@ -8,8 +10,13 @@ import (
 	"os"
 	"time"
 	
-) 
+	// Import the pq driver so that it can register itself with the database/sql
+// package. Note that we alias this import to the blank identifier, to stop the Go
+// compiler complaining that the package isn't being used.
+	_ "github.com/lib/pq"  /// postgres driver
+	
 
+) 
 
 
 ///  application version number
@@ -19,6 +26,9 @@ const version = "1.0.0"
 type config struct {
 	port int  // for the server
 	env string // specifies the environment(dev, staging, production)
+	db  struct {
+		dsn	string
+	}
 }
 
 // an application struct to hold dependecncies for the http handlers, helpers, and middleware
@@ -36,12 +46,23 @@ func main() {
 	// the default value is set to 4000 and development
 	flag.IntVar(&cfg.port, "port", 4000, "API server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
-	flag.Parse() /// allow us pass command line flags when running the application e.g go run ./cmd/api -port=33033 -env=production
+	flag.StringVar(&cfg.db.dsn, "db-dsn", os.Getenv("GREENLIGHT_DB_DSN"), "PostgreSQL DSN")
 
+	flag.Parse() /// allow us pass command line flags when running the application e.g go run ./cmd/api -port=33033 -env=production
 	// Initialize a new logger which writes messages to the standard out stream,
 	// prefixed with the current date and time.
 	logger := log.New(os.Stdout, "", log.Ldate | log.Ltime)
 
+	db, err := openDB(cfg) // creates the connection pool
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	defer db.Close()
+
+	logger.Printf("database connection pool established")
+	
+	
 	// Declare an instance of the application struct, containing the config struct and
 	// the logger
 	app := &application{
@@ -64,9 +85,25 @@ func main() {
 
 	//starting the http server
 	logger.Printf("starting %s server on %s", cfg.env, srv.Addr)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	log.Fatal(err)
 }
 
 
+func openDB(cfg config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", cfg.db.dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, err
+}
 
