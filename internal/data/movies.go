@@ -1,10 +1,20 @@
 package data
 
 import (
+	"database/sql"
+	"errors"
 	"time"
 
+
 	"github.com/goddhi/zeliz-movie/internal/validator"
+	"github.com/lib/pq"
 )
+
+//MovieModel struct type which wraps a sql.DB connection pool.
+type MovieModel struct {
+	DB *sql.DB
+}
+
 
 type Movie struct {
 	ID			int64  `json:"id"`   // Unique integer ID for the movie
@@ -16,6 +26,114 @@ type Movie struct {
 	Version		int32 `json:"version"`// time the movie information is updated
 
 }
+
+
+func (m MovieModel) Insert(movie *Movie) error {
+
+	query := `
+				INSERT INTO movies (title, year, runtime, genres)
+				VALUES ($1, $2, $3, $4)
+				RETURNING id, created_at, version`
+
+			// an args slice containing the values for the placeholder parameters from
+			// the movie struct.
+	args := []interface{}{movie.Title, movie.Year, movie.Runtime, pq.Array(movie.Genres)}
+
+	// Use the QueryRow() method to execute the SQL query on our connection pool,
+	// passing in the args slice as a variadic parameter and scanning the system-
+	// generated id, created_at and version values into the movie struct.
+	return m.DB.QueryRow(query, args...).Scan(&movie.ID, &movie.CreateAt, &movie.Version)
+}
+
+
+func (m *MovieModel) Get(id int64) (*Movie, error) {
+
+	if id < 1 {
+		return nil, ErrRecordNotFound
+	}
+
+	query := `
+				SELECT id, created_at, title, year, runtime, genres, version
+				FROM movies
+				WHERE id = $1`
+
+	// this holds the data returned by the query
+	var movie Movie
+
+	err := m.DB.QueryRow(query, id).Scan(
+		&movie.ID,
+		&movie.CreateAt,
+		&movie.Title,
+		&movie.Year,
+		&movie.Runtime,
+		pq.Array(&movie.Genres),
+		&movie.Version,
+	)
+
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrRecordNotFound
+		default:
+			return nil, err
+		}
+	}
+
+	return &movie, nil
+}
+
+func (m *MovieModel) Update(movie *Movie) error {
+	query := `
+			UPDATE movies
+			SET title = $1, year = $2, runtime = $3, genres = $4, version = version + 1
+			WHERE id = $5
+			RETURNING version`
+
+	args := []interface{}{
+		movie.Title,
+		movie.Year,
+		movie.Runtime,
+		pq.Array(movie.Genres),
+		movie.ID,
+
+}
+
+
+// Use the QueryRow() method to execute the query, passing in the args slice as a
+// variadic parameter and scanning the new version value into the movie struct.
+	return m.DB.QueryRow(query, args...).Scan(&movie.Version)
+}
+
+func (m *MovieModel) Delete(id int64) error {
+	if id < 1 {
+		return ErrRecordNotFound
+	}
+
+	query := `
+		DELETE FROM movies
+		WHERE id = $1
+	`
+
+	result, err := m.DB.Exec(query, id)
+	if err != nil {
+		return err
+	}
+
+
+	// Call the RowsAffected() method on the sql.Result object to get the number of rows
+	// affected by the query.
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+	return nil
+}
+
+
 
 
 func ValidateMovie(v *validator.Validator, movie *Movie) {

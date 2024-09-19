@@ -3,21 +3,21 @@ package main
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
-	
+
 	// Import the pq driver so that it can register itself with the database/sql
-// package. Note that we alias this import to the blank identifier, to stop the Go
-// compiler complaining that the package isn't being used.
-	_ "github.com/lib/pq"  /// postgres driver
-	
+	// package. Note that we alias this import to the blank identifier, to stop the Go
+	// compiler complaining that the package isn't being used.
+	_ "github.com/lib/pq" /// postgres driver
 
-) 
+	"github.com/goddhi/zeliz-movie/internal/data"
 
+)
 
 ///  application version number
 const version = "1.0.0"
@@ -38,6 +38,8 @@ type config struct {
 type application struct {
 	config config  // copy of the config strucy
 	logger *log.Logger // 
+	models	data.Models
+
 
 }
 
@@ -76,6 +78,7 @@ func main() {
 	app := &application{
 		config: cfg,
 		logger: logger,
+		models: data.NewModels(db), // Use the data.NewModels() function to initialize a Models struct, passing in the	// connection pool as a parameter.
 	}
 
 	// setting up the router and handler

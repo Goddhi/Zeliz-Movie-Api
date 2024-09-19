@@ -29,7 +29,7 @@ func (app *application) serverErrorResponse(w http.ResponseWriter, r * http.Requ
 }
 
 func (app *application) notFoundResponse(w http.ResponseWriter, r *http.Request) {
-	message := "the request resource could not be found"
+	message := "the requested resource could not be found"
 	app.errorResponse(w, r, http.StatusNotFound, message)
 }
 
