@@ -158,6 +158,60 @@ func (m *MovieModel) Delete(id int64) error {
 }
 
 
+func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*Movie, error) {
+	// CSQL query to retrieve all movie records.
+	query := `
+				SELECT id, created_at, title, year, runtime, genres, version
+				FROM movies
+				WHERE (to_tsvector('simple', title) @@ plainto_tsquery('simple', $1) OR $1 = '')
+				AND (genres @> $2 OR $2 = '{}')
+				ORDER BY id`
+
+
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Pass the title and genres as the placeholder parameter values.
+	rows, err := m.DB.QueryContext(ctx, query, title, pq.Array(genres))
+	if err != nil {
+		return nil, err
+	}
+
+	// Importantly, defer a call to rows.Close() to ensure that the resultset is closed
+// before GetAll() returns.
+	defer rows.Close()
+
+	movies := []*Movie{}
+
+	for rows.Next() {
+		// Initialize an empty Movie struct to hold the data for an individual movie.
+		var movie Movie
+
+		err := rows.Scan(
+			&movie.ID,
+			&movie.CreateAt,
+			&movie.Title,
+			&movie.Year,
+			&movie.Runtime,
+			pq.Array(&movie.Genres),
+			&movie.Version,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		// Add the Movie struct to the slice.
+		movies = append(movies, &movie)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return movies, nil
+}
 
 
 func ValidateMovie(v *validator.Validator, movie *Movie) {
